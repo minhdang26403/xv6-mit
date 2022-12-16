@@ -19,10 +19,10 @@ int readline(char *new_argv[MAXARG], int curr_argc) {
     }
     n++;
   }
-  buf[n] = 0;
   if (n == 0) {
     return 0;
   }
+  buf[n] = 0;
   int offset = 0;
   while (offset < n) {
     new_argv[curr_argc++] = buf + offset;
@@ -30,7 +30,7 @@ int readline(char *new_argv[MAXARG], int curr_argc) {
       offset++;
     }
     while (buf[offset] == ' ' && offset < n) {
-      offset++;
+      buf[offset++] = 0;
     }
   }
   return curr_argc;

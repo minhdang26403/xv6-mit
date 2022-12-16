@@ -3,13 +3,13 @@
 #include "user/user.h"
 #include "kernel/param.h"
 
-#define MAXLEN 1024
+#define MAXLEN 100
 #define STDIN 0
 
 int readline(char *new_argv[MAXARG], int curr_argc) {
   char buf[MAXLEN];
   int n = 0;
-  while (read(0, buf + n, 1)) {
+  while (read(STDIN, buf + n, 1)) {
     if (n == MAXLEN - 1) {
       fprintf(2, "argument is too long\n");
       exit(1);
@@ -20,7 +20,9 @@ int readline(char *new_argv[MAXARG], int curr_argc) {
     n++;
   }
   buf[n] = 0;
-  if (n == 0) return 0;
+  if (n == 0) {
+    return 0;
+  }
   int offset = 0;
   while (offset < n) {
     new_argv[curr_argc++] = buf + offset;
@@ -28,7 +30,7 @@ int readline(char *new_argv[MAXARG], int curr_argc) {
       offset++;
     }
     while (buf[offset] == ' ' && offset < n) {
-      buf[offset++] = 0;
+      offset++;
     }
   }
   return curr_argc;
@@ -40,7 +42,7 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
-  char *command = malloc(strlen(argv[1]) + 1);
+  char command[strlen(argv[1]) + 1];
   char *new_argv[MAXARG];
   strcpy(command, argv[1]);
   for (int i = 1; i < argc; ++i) {
@@ -57,6 +59,9 @@ int main(int argc, char *argv[]) {
       exit(1);
     }
     wait(0);
+  }
+  for (int i = 0; i < curr_argc; ++i) {
+    free(new_argv[i]);
   }
   exit(0);
 }

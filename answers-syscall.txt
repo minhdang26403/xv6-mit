@@ -1,0 +1,8 @@
+1. The usertrap() function called syscall()
+2. The value of p->trapframe->a7 is 7. This value represents SYS_exec, which used as a index to the array mapping syscall numbers to system call.
+3. The previous mode of the CPU was usermode.
+4. The kernel is panicing at the instruction:
+- 80001ff8:	00002683          	lw	a3,0(zero)
+- The register a3 corresponds to the variable num
+5. The kernel crash due to load page fault because the virtual address 0 is not mapped to any physical address.
+6. The "initcode" binary was running when the kernel paniced. Its process id is 1.

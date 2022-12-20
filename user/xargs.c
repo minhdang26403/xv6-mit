@@ -38,7 +38,7 @@ int readline(char *new_argv[MAXARG], int curr_argc) {
 
 int main(int argc, char *argv[]) {
   if (argc <= 1) {
-    fprintf(2, "usage: xargs command [args...]\n");
+    fprintf(2, "usage: xargs [command] [args ...]\n");
     exit(1);
   }
 

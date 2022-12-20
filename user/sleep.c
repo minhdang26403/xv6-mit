@@ -3,7 +3,7 @@
 
 int main(int argc, char *argv[]) {
   if (argc <= 1) {
-    fprintf(2, "Usage: sleep seconds\n");
+    fprintf(2, "Usage: sleep [seconds]\n");
     exit(1);
   }
 

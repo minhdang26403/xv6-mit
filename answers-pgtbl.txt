@@ -1,0 +1,16 @@
+1. Any system calls that use data from the shared-page
+2. 
+Level 2: page 0
+  Level 1: page 0
+    Level 0:
+      - Page 0: Text of the program (R-X-)
+      - Page 1: Data page (RW-U)
+      - Page 2: Guard page (----)
+      - Page 3: Stack page (RW-U)
+Level 2: page 255
+  Level 1: page 511
+    Level 0:
+      - Page 509: USYSCALL (R--U)
+      - Page 510: Trapframe (R-W-)
+      - Page 511: Trampoline (RX--)
+

@@ -6,6 +6,8 @@
 #include "defs.h"
 #include "fs.h"
 
+#define MAX_LEVEL 2
+
 /*
  * the kernel's page table.
  */
@@ -436,4 +438,27 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+// recursive function for printing the page table at lower level
+void vmprint_helper(pagetable_t pagetable, int level) {
+  for (int i = 0; i < 512; ++i) {
+    pte_t pte = pagetable[i];
+    if (pte & PTE_V) {
+      for (int j = level; j <= MAX_LEVEL; ++j) {
+        printf(" ..");
+      }
+      uint64 pa = PTE2PA(pte);
+      printf("%d: pte %p pa %p\n", i, pte, pa);
+      if ((pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+        vmprint_helper((pagetable_t)pa, level - 1);
+      }
+    }
+  }
+}
+
+// print the page table
+void vmprint(pagetable_t pagetable) {
+  printf("page table %p\n", pagetable);
+  vmprint_helper(pagetable, 2);
 }

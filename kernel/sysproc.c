@@ -70,14 +70,42 @@ sys_sleep(void)
 }
 
 
-#ifdef LAB_PGTBL
+// #ifdef LAB_PGTBL
 int
 sys_pgaccess(void)
 {
-  // lab pgtbl: your code here.
+  uint64 a, va, abits;
+  int npages; // number of pages to scan
+  unsigned int abitmask = 0;  // temporary bit mask
+  pagetable_t pagetable = myproc()->pagetable; // user page table
+
+  argaddr(0, &va); // starting virtual address of the first user page
+  argint(1, &npages);
+  argaddr(2, &abits); // address of user's bit mask
+
+  // limit the number of pages to scan
+  if (npages > 32) {
+    return -1;
+  }
+
+  for (int i = 0; i < npages; ++i) {
+    a = va + i * PGSIZE;
+    pte_t *pte;
+    if ((pte = walk(pagetable, a, 0)) == 0) {
+      return -1;
+    }
+    if (*pte & PTE_A) {
+      *pte &= ~PTE_A;
+      abitmask |= (1 << i);
+    }
+  }
+
+  // copy the temporary bit mask out to dst user address
+  copyout(pagetable, abits, (char *)&abitmask, sizeof(abitmask));
+
   return 0;
 }
-#endif
+// #endif
 
 uint64
 sys_kill(void)

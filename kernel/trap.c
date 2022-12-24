@@ -77,8 +77,21 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2) {
     yield();
+    if (p->ticks != 0 && p->reentrant_call == 0) {
+      p->ticks_passed++;
+      if (p->ticks_passed == p->ticks) {
+        memmove(p->alarm_trapframe, p->trapframe, sizeof(struct trapframe));
+        // reset alarm counter
+        p->ticks_passed = 0;
+        // change the exception program counter to point to the alarm handler
+        p->trapframe->epc = p->handler;
+        // prevent kernel from calling the alarm handler when handler hasn't returned yet
+        p->reentrant_call = 1;
+      }
+    }
+  }
 
   usertrapret();
 }

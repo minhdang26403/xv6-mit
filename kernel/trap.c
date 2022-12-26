@@ -49,8 +49,9 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
+  uint64 scause = r_scause();
   
-  if(r_scause() == 8){
+  if(scause == 8){
     // system call
 
     if(killed(p))
@@ -67,6 +68,33 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if (scause == 15) {
+    pte_t *pte;
+    uint64 va = r_stval();
+    if ((pte = walk(p->pagetable, va, 0)) == 0) {
+      panic("usertrap: walk");
+    }
+
+    if ((*pte & PTE_COW) == 0) {
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      setkilled(p);
+      exit(-1);
+    }
+    char *mem;
+    if ((mem = (char *)kalloc()) == 0) {
+      panic("kalloc: out-of-memory");
+    }
+    uint64 pa = PTE2PA(*pte);
+    memmove(mem, (char *)pa, PGSIZE);
+    uint flags = PTE_FLAGS(*pte);
+    flags |= PTE_W;
+    flags &= ~PTE_COW;
+    if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, flags) != 0) {
+      kfree(mem);
+      panic("mappages: error");
+    }
+    decr_ref(pa);
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());

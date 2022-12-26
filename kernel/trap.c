@@ -29,6 +29,34 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+int
+cowhandler(pagetable_t pagetable, uint64 va)
+{ 
+  if (va >= MAXVA) {
+    return -1;
+  }
+  pte_t *pte = walk(pagetable, va, 0);
+  if (pte == 0) {
+    return -1;
+  }
+  if ((*pte & PTE_U) == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_COW) == 0) {
+    return -1;
+  }
+
+  uint64 pa = PTE2PA(*pte);
+  uint64 mem = (uint64)kalloc();
+  if (mem == 0) {
+    printf("cowhandler: kalloc failed\n");
+    return -1;
+  }
+  memmove((void *)mem, (void *)pa, PGSIZE);
+  kfree((void *)pa);  // decrement refcount of pa (and free if refcount is 0)
+  uint flags = PTE_FLAGS(*pte);
+  *pte = PA2PTE(mem) | flags | PTE_W;
+  *pte &= ~PTE_COW;
+  return 0;
+}
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -69,32 +97,14 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else if (scause == 15) {
-    pte_t *pte;
-    uint64 va = r_stval();
-    if ((pte = walk(p->pagetable, va, 0)) == 0) {
-      panic("usertrap: walk");
-    }
-
-    if ((*pte & PTE_COW) == 0) {
-      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-      setkilled(p);
+    // store page fault
+    if (killed(p)) {
       exit(-1);
     }
-    char *mem;
-    if ((mem = (char *)kalloc()) == 0) {
-      panic("kalloc: out-of-memory");
+
+    if (cowhandler(p->pagetable, r_stval()) < 0) {
+      setkilled(p);
     }
-    uint64 pa = PTE2PA(*pte);
-    memmove(mem, (char *)pa, PGSIZE);
-    uint flags = PTE_FLAGS(*pte);
-    flags |= PTE_W;
-    flags &= ~PTE_COW;
-    if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, flags) != 0) {
-      kfree(mem);
-      panic("mappages: error");
-    }
-    decr_ref(pa);
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());

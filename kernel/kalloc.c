@@ -9,6 +9,9 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define NUM_PAGE ((PHYSTOP - KERNBASE) / PGSIZE)
+#define PA2IDX(pa) ((pa - KERNBASE) / PGSIZE)
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -21,7 +24,7 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
-  uint32 refcount[PGROUNDUP(PHYSTOP - KERNBASE) / PGSIZE];
+  uint32 refcount[NUM_PAGE];
 } kmem;
 
 void
@@ -29,10 +32,6 @@ kinit()
 {
   initlock(&kmem.lock, "kmem");
   freerange(end, (void*)PHYSTOP);
-  uint32 len = PGROUNDUP(PHYSTOP - KERNBASE) / PGSIZE;
-  for (uint32 i = 0; i < len; ++i) {
-    kmem.refcount[i] = 0;
-  }
 }
 
 void
@@ -40,8 +39,11 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
+    kmem.refcount[PA2IDX((uint64)p)] = 1;
     kfree(p);
+  }
+  
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -57,8 +59,14 @@ kfree(void *pa)
     panic("kfree");
 
   acquire(&kmem.lock);
-  if (kmem.refcount[((uint64)pa) / PGSIZE] > 0) {
-    release(&kmem.lock);
+  int pn = PA2IDX((uint64)pa);
+  if (kmem.refcount[pn] < 1) {
+    panic("kfree: refcount");
+  }
+  kmem.refcount[pn]--;
+  int tmp = kmem.refcount[pn];
+  release(&kmem.lock);
+  if (tmp > 0) {
     return;
   }
 
@@ -67,10 +75,9 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  // acquire(&kmem.lock);
+  acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
-  kmem.refcount[((uint64)pa) / PGSIZE] = 0;
   release(&kmem.lock);
 }
 
@@ -85,8 +92,12 @@ kalloc(void)
   acquire(&kmem.lock);
   r = kmem.freelist;
   if(r) {
+    int pn = PA2IDX((uint64)r);
+    if (kmem.refcount[pn] > 0) {
+      panic("kalloc: free page has non-zero reference count");
+    }
     kmem.freelist = r->next;
-    kmem.refcount[((uint64)r) / PGSIZE] = 1;
+    kmem.refcount[pn] = 1;
   }
   release(&kmem.lock);
 
@@ -96,16 +107,14 @@ kalloc(void)
   return (void*)r;
 }
 
-void incr_ref(uint64 pa) {
+void
+increfcount(uint64 pa)
+{ 
+  int pn = PA2IDX((uint64)pa);
   acquire(&kmem.lock);
-  // if (kmem.refcount[pa / PGSIZE] > 0)
-  kmem.refcount[pa / PGSIZE]++;
-  release(&kmem.lock);
-}
-
-void decr_ref(uint64 pa) {
-  acquire(&kmem.lock);
-  // if (kmem.refcount[pa / PGSIZE] > 0)
-  kmem.refcount[pa / PGSIZE]--;
+  if (kmem.refcount[pn] < 1 || pa >= PHYSTOP) {
+    panic("increfcount");
+  }
+  kmem.refcount[pn]++;
   release(&kmem.lock);
 }

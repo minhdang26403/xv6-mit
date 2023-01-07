@@ -417,6 +417,43 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
 
+  bn -= NINDIRECT;
+
+  if (bn < NINDIRECT * NINDIRECT) {
+    // Load the address of double-indirect block, allocating if necessary
+    if ((addr = ip->addrs[NDIRECT + 1]) == 0) {
+      addr = balloc(ip->dev);
+      if (addr == 0)
+        return 0;
+      ip->addrs[NDIRECT + 1] = addr;
+    }
+    // Load the first level block
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if ((addr = a[bn / NINDIRECT]) == 0) {
+      addr = balloc(ip->dev);
+      if (addr) {
+        a[bn / NINDIRECT] = addr;
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+    // Load the second level block
+    bp = bread(ip->dev, addr);
+    a = (uint *)bp->data;
+    bn = bn % NINDIRECT;
+    // Load the address of the data block from the second level block
+    if ((addr = a[bn]) == 0) {
+      addr = balloc(ip->dev);
+      if (addr) {
+        a[bn] = addr;
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+    return addr;
+  }
+
   panic("bmap: out of range");
 }
 
@@ -446,6 +483,32 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  struct buf *bp1, *bp2;
+  uint *a1, *a2;
+  int k;
+
+  if (ip->addrs[NDIRECT + 1]) {
+    // Load the first level block of the double-indirect hierarchy
+    bp1 = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a1 = (uint*)bp1->data;
+    for (j = 0; j < NINDIRECT; j++) {
+      if (a1[j]) {
+        // Load the second level block
+        bp2 = bread(ip->dev, a1[j]);
+        a2 = (uint*)bp2->data;
+        for (k = 0; k < NINDIRECT; k++) {
+          if (a2[k]) 
+            bfree(ip->dev, a2[k]);
+        }
+        brelse(bp2);
+        bfree(ip->dev, a1[j]);
+      }
+    }
+    brelse(bp1);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
   }
 
   ip->size = 0;

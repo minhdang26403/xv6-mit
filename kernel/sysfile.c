@@ -332,6 +332,28 @@ sys_open(void)
       iunlockput(ip);
       end_op();
       return -1;
+    } else if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+      int count = 0; // the depth of links
+      // recursively follow the symbolic link
+      while (ip->type == T_SYMLINK) {
+        // read data from this inode, which stores the path (symbolic link or hard link)
+        if (readi(ip, 0, (uint64)path, 0, sizeof(path)) != sizeof(path)) {
+          panic("open: readi");
+        }
+        iunlockput(ip);
+        // Find the inode of this link
+        if ((ip = namei(path)) == 0) {
+          end_op();
+          return -1;
+        }
+        ilock(ip);
+        // Terminate since the program may encounter a cycle of symbolic links
+        if (++count == 10) {
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+      }
     }
   }
 
@@ -368,6 +390,33 @@ sys_open(void)
   end_op();
 
   return fd;
+}
+
+uint64
+sys_symlink(void)
+{
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *ip;
+  if (argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+  
+  begin_op();
+  // Create a new inode for this symbolic link
+  if ((ip = create(path, T_SYMLINK, 0, 0)) == 0) {
+    end_op();
+    return -1;
+  }
+
+  // Store the target path in the data blocks of this inode
+  if (writei(ip, 0, (uint64)target, 0, sizeof(target)) != sizeof(target)) {
+    panic("symlink: writei");
+  }
+  iupdate(ip);
+  iunlockput(ip);
+
+  end_op();
+
+  return 0;
 }
 
 uint64

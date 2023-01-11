@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+#include "fcntl.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -29,6 +33,58 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+int
+pagefaulthandler(uint64 va)
+{
+  struct proc *p = myproc();
+  if (va >= p->sz || va < p->trapframe->sp) {
+    printf("pagefaulthandler: invalid virtual address\n");
+    return -1;
+  }
+  struct vm_area_struct *vma = 0;
+  for (int i = 0; i < NVMA; ++i) {
+    vma = &p->vmas[i];
+    if (vma->valid && vma->vm_start <= va && va < vma->vm_start + vma->vm_length) {
+      break;
+    }
+  }
+
+  if (vma == 0) {
+    printf("pagefaulthandler: virtual address not in VMAs\n");
+    return -1;
+  }
+
+  uint64 mem = (uint64)kalloc();
+  if (mem == 0) {
+    printf("pagefaulthandler: kalloc failed\n");
+    return -1;
+  }
+  // Zero out the new page
+  memset((void *)mem, 0, PGSIZE);
+
+  int perm = PTE_U;
+  // Protection flags will be R or W or both
+  if (vma->vm_prot & PROT_READ) {
+    perm |= PTE_R;
+  }
+  if (vma->vm_prot & PROT_WRITE) {
+    perm |= PTE_W;
+  }
+  if (mappages(p->pagetable, va, PGSIZE, mem, perm) == -1) {
+    kfree((void *)mem);
+    printf("pagefaulthandler: mappages failed\n");
+    return -1;
+  }
+
+  struct inode *ip = vma->vm_file->ip;
+  // Read the content of the file
+  ilock(ip);
+  readi(ip, 0, mem, va - vma->vm_start, PGSIZE);
+  iunlock(ip);
+
+  return 0;
+}
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -49,8 +105,9 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
+  uint64 scause = r_scause();
   
-  if(r_scause() == 8){
+  if(scause == 8){
     // system call
 
     if(killed(p))
@@ -67,6 +124,10 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if (scause == 13 || scause == 15) {
+    if (pagefaulthandler(r_stval()) < 0) {
+      setkilled(p);
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());

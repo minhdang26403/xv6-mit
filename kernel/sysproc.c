@@ -5,6 +5,10 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
 
 uint64
 sys_exit(void)
@@ -90,4 +94,87 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64
+sys_mmap(void)
+{ 
+  // addr (first argument) will be always 0
+  int length, prot, flags, fd;
+  argint(1, &length);
+  argint(2, &prot);
+  argint(3, &flags);
+  argint(4, &fd);
+
+  struct proc *p = myproc();
+  // File is not writable but mapped with PROT_WRITE, but mapped
+  // with MAP_PRIVATE is still writable since writes are not flushed
+  // to disk
+  if (!p->ofile[fd]->writable && (prot & PROT_WRITE) && !(flags & MAP_PRIVATE)) {
+    return -1;
+  }
+
+  struct vm_area_struct *vma = 0;
+  // Allocate a new VMA struct
+  for (int i = 0; i < NVMA; ++i) {
+    if (p->vmas[i].valid == 0) {
+      vma = &p->vmas[i];
+      break;
+    }
+  }
+  if (vma == 0) {
+    return -1;
+  }
+
+  vma->vm_start = p->sz;
+  vma->vm_length = length;
+  vma->vm_prot = prot;
+  vma->vm_flags = flags;
+  vma->vm_file = p->ofile[fd];
+  vma->valid = 1;
+  filedup(vma->vm_file);
+
+  p->sz += length;  // Lazy allocation
+
+  return vma->vm_start;
+}
+
+uint64
+sys_munmap(void)
+{ 
+  // Only unmap at the start, or at the end, or the whole region
+  // (but not punch a hole in the middle of a region)
+  uint64 addr;
+  int length;
+  argaddr(0, &addr);
+  argint(1, &length);
+
+  struct proc *p = myproc();
+  struct vm_area_struct *vma = 0;
+  for (int i = 0; i < NVMA; ++i) {
+    vma = &p->vmas[i];
+    if (vma->valid && vma->vm_start <= addr && addr < vma->vm_start + vma->vm_length) {
+      break;
+    }
+  }
+  if (vma == 0) {
+    return -1;
+  }
+  // Write back the data to disk if the file is mapped with MAP_SHARED
+  if (vma->vm_flags & MAP_SHARED) {
+    filewrite(vma->vm_file, addr, length);
+  }
+  // Unmap the file (some pages may not be mapped with actual physical address
+  // due to lazy allocation)
+  uvmunmap(p->pagetable, addr, length / PGSIZE, 1);
+  // Unmap at the start of the region
+  if (addr == vma->vm_start) {
+    vma->vm_start += length;
+  }
+  vma->vm_length -= length;
+  if (vma->vm_length == 0) {
+    fileclose(vma->vm_file);
+    vma->valid = 0;
+  }
+  return 0;
 }

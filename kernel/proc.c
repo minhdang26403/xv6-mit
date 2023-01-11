@@ -288,6 +288,14 @@ fork(void)
     return -1;
   }
 
+  // Copy parent's mapped regions to child
+  for (int i = 0; i < NVMA; ++i) {
+    if (p->vmas[i].valid) {
+      memmove((void *)&np->vmas[i], (void *)&p->vmas[i], sizeof(struct vm_area_struct));
+      filedup(p->vmas[i].vm_file);
+    }
+  }
+
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
@@ -357,6 +365,17 @@ exit(int status)
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
+    }
+  }
+
+  // Unmap the process's mapped region
+  struct vm_area_struct *vma;
+  for (int i = 0; i < NVMA; ++i) {
+    vma = &p->vmas[i];
+    if (vma->valid) {
+      uvmunmap(p->pagetable, vma->vm_start, vma->vm_length / PGSIZE, 1);
+      fileclose(vma->vm_file);
+      vma->valid = 0;
     }
   }
 

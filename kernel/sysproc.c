@@ -162,7 +162,14 @@ sys_munmap(void)
   }
   // Write back the data to disk if the file is mapped with MAP_SHARED
   if (vma->vm_flags & MAP_SHARED) {
-    filewrite(vma->vm_file, addr, length);
+    pte_t *pte = walk(p->pagetable, addr, 0);
+    // Only write back dirty pages
+    if (*pte & PTE_D) {
+      if (filewrite(vma->vm_file, addr, length) != length) {
+        printf("munmap: filewrite failed\n");
+        return -1;
+      }
+    }
   }
   // Unmap the file (some pages may not be mapped with actual physical address
   // due to lazy allocation)

@@ -99,7 +99,7 @@ sys_uptime(void)
 uint64
 sys_mmap(void)
 { 
-  // addr (first argument) will be always 0
+  // addr (first argument) and offset (sixth argument) will be always 0
   int length, prot, flags, fd;
   argint(1, &length);
   argint(2, &prot);

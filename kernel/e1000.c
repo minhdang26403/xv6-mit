@@ -102,22 +102,33 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
+  if (m->len > DATA_MAX) {
+    return -1;
+  }
+
   acquire(&e1000_lock);
-  int idx = regs[E1000_TDT] % TX_RING_SIZE;
-  struct tx_desc *desc = &tx_ring[idx];
+  int tail = regs[E1000_TDT];
+  struct tx_desc *desc = &tx_ring[tail];
   if ((desc->status & E1000_TXD_STAT_DD) == 0) {
     release(&e1000_lock);
     return -1;
   }
-  if (tx_mbufs[idx] != 0) {
-    mbuffree(tx_mbufs[idx]);
+  if (tx_mbufs[tail]) {
+    mbuffree(tx_mbufs[tail]);
   }
+
   desc->addr = (uint64)m->head;
   desc->length = (uint16)m->len;
+  desc->status = 0;
   desc->cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
   // stash away a pointer to the mbuf for later freeing
-  tx_mbufs[idx] = m;
-  regs[E1000_TDT] = (idx + 1) % TX_RING_SIZE;
+  tx_mbufs[tail] = m;
+
+  // make sure every statements above happen and materialize in the RAM 
+  // before moving the tail pointer since moving pointer makes the NIC read the value
+  __sync_synchronize();
+  // move the tail pointer
+  regs[E1000_TDT] = (tail + 1) % TX_RING_SIZE;
   release(&e1000_lock);
 
   return 0;
@@ -132,22 +143,26 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
-  int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
-  struct rx_desc *desc = &rx_ring[idx];
+  int tail = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  struct rx_desc *desc = &rx_ring[tail];
 
   while (desc->status & E1000_RXD_STAT_DD) {
     // deliver packet to the network stack
-    rx_mbufs[idx]->len = desc->length;
-    net_rx(rx_mbufs[idx]);
+    rx_mbufs[tail]->len = desc->length;
+    net_rx(rx_mbufs[tail]);
+    if (rx_ring[tail].length > MBUF_SIZE) {
+      panic("e1000 length");
+    }
 
-    rx_mbufs[idx] = mbufalloc(0);
-    desc->addr = (uint64)rx_mbufs[idx]->head;
+    rx_mbufs[tail] = mbufalloc(0);
+    desc->addr = (uint64)rx_mbufs[tail]->head;
     desc->status = 0;
+    __sync_synchronize();
 
     // move to the next packet
-    regs[E1000_RDT] = idx;
-    idx = (idx + 1) % RX_RING_SIZE;
-    desc = &rx_ring[idx];
+    regs[E1000_RDT] = tail;
+    tail = (tail + 1) % RX_RING_SIZE;
+    desc = &rx_ring[tail];
   }
 }
 
